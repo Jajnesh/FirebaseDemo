@@ -2,9 +2,13 @@ package com.example.firebasedemo
 
 import android.annotation.SuppressLint
 import android.content.ContentValues.TAG
+import android.content.Context
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
@@ -67,17 +71,24 @@ import com.google.firebase.firestore.firestore
 import com.google.firebase.firestore.toObject
 import java.util.concurrent.TimeUnit
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.*
+import coil.compose.rememberAsyncImagePainter
+import com.example.firebasedemo.ui.theme.Purple80
 import com.google.firebase.firestore.ktx.firestore
+import com.google.firebase.storage.storage
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -85,257 +96,66 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             FirebaseDemoTheme {
-                AppNavigation()
+                ImageUploadScreen()
             }
         }
     }
 
-    val firebaseDB = Firebase.firestore
+    val storage = Firebase.storage
+    val storageRef = storage.reference
 
-    private suspend fun addUserToFirebaseDB(name: String, age: Int): String {
-        val isAdult = age >= 18
-        val firebaseUser = FirebaseUser(name, age, isAdult)
-        return try {
-            firebaseDB.collection("users").add(firebaseUser).await()
-            "User Created Successfully!!"
-        } catch (e: Exception) {
-            Log.w(TAG, "Document couldn't be added. $e")
-            "User Creation Failed!!"
-        }
-    }
+    fun uploadImage(uri: Uri, context: Context) {
+        val fileName = "images/${UUID.randomUUID()}.jpg"
+        val imageRef = storageRef.child(fileName)
 
-    private suspend fun updateFirebaseUser(name: String, age: Int): String {
-        val isAdult = age >= 18
-        return try {
-            val querySnapshot = firebaseDB.collection("users")
-                .whereEqualTo("name", name)
-                .get()
-                .await()
-
-            if (querySnapshot.isEmpty) {
-                "User not found."
-            } else {
-                for (document in querySnapshot) {
-                    firebaseDB.collection("users")
-                        .document(document.id)
-                        .update("age", age, "adult", isAdult)
-                        .await()
+        imageRef.putFile(uri)
+            .addOnCompleteListener {takeSnapShot ->
+                imageRef.downloadUrl.addOnSuccessListener { uri -> 
+                    Toast.makeText(context, "Image URI: $uri", Toast.LENGTH_LONG).show()
                 }
-                "User Updated Successfully!!"
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Update unsuccessful. $e")
-            "User Update Failed!!"
-        }
+            .addOnFailureListener { exception ->
+                Toast.makeText(context,"Image upload failed: ${exception.message}", Toast.LENGTH_LONG).show()
+            }
     }
 
-    private suspend fun deleteFirebaseUser(name: String): String {
-        return try {
-            val querySnapshot = firebaseDB.collection("users")
-                .whereEqualTo("name", name)
-                .get()
-                .await()
-
-            if (querySnapshot.isEmpty) {
-                "User not found."
-            } else {
-                for (document in querySnapshot) {
-                    firebaseDB.collection("users")
-                        .document(document.id)
-                        .delete()
-                        .await()
-                }
-                "User Deletion Successful!!"
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error deleting document", e)
-            "User Deletion Failed!!"
-        }
-    }
-
-    private suspend fun retrieveFirebaseUsers(): List<FirebaseUser> {
-        return try {
-            val querySnapshot = firebaseDB.collection("users")
-                .get()
-                .await()
-
-            querySnapshot.map { document ->
-                document.toObject(FirebaseUser::class.java)
-            }
-        } catch (e: Exception) {
-            Log.d(TAG, "Error getting documents: ", e)
-            emptyList()
-        }
-    }
-
-    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    fun FirebaseUserScreen(navController: NavController) {
-        val mode = remember { mutableStateOf("Create") }
-        val name = remember { mutableStateOf("") }
-        val age = remember { mutableStateOf("") }
-        val message = remember { mutableStateOf("") }
-
-        if (message.value.isNotEmpty()) {
-            AlertDialog(
-                onDismissRequest = { message.value = "" },
-                title = { Text(text = "Message") },
-                text = { Text(text = message.value) },
-                confirmButton = {
-                    Button(onClick = { message.value = "" }) {
-                        Text(text = "OK")
-                    }
-                }
-            )
+    fun ImageUploadScreen() {
+        val context = LocalContext.current
+        val imageUri = remember{
+            mutableStateOf<Uri?>(null)
         }
-
-        val gradientColor = listOf(Color.Black, Color.Blue, Color.DarkGray)
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(30.dp),
+        
+        val launcher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) {uri: Uri? -> 
+            imageUri.value = uri
+        }
+        
+        Column (
+            modifier = Modifier.padding(20.dp)
+                .fillMaxSize(),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row {
-                OutlinedButton(onClick = { mode.value = "Create" }) {
-                    Text(text = "Create/Add")
-                }
-                OutlinedButton(onClick = { navController.navigate("DisplayUsersScreen") }) {
-                    Text(text = "Retrieve")
-                }
+            Button(onClick = {
+                launcher.launch("image/*")
+            }) {
+                Text(text = "Select Image")
             }
-            Row {
-                OutlinedButton(onClick = { mode.value = "Update" }) {
-                    Text(text = "Update")
-                }
-                OutlinedButton(onClick = { mode.value = "Delete" }) {
-                    Text(text = "Delete")
-                }
-            }
+            Spacer(modifier = Modifier.height(20.dp))
+            imageUri.value?.let { 
+                Image(
+                    painter = rememberAsyncImagePainter(it),
+                    contentDescription = "Uploaded Image",
+                    modifier = Modifier.size(250.dp))
 
-            Text(
-                text = when (mode.value) {
-                    "Create" -> "Create / Add User"
-                    "Update" -> "Update User"
-                    "Delete" -> "Delete User By Name"
-                    else -> "404 Error"
-                },
-                style = TextStyle(brush = Brush.linearGradient(gradientColor)),
-                fontSize = 30.sp
-            )
-            Spacer(modifier = Modifier.height(25.dp))
-            OutlinedTextField(
-                value = name.value,
-                onValueChange = { name.value = it },
-                label = { Text(text = "Enter Name") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.Black,
-                    focusedBorderColor = Color.DarkGray,
-                    focusedLabelColor = Color.DarkGray,
-                    unfocusedTextColor = Color.Blue,
-                    unfocusedLabelColor = Color.Blue,
-                    unfocusedBorderColor = Color.Blue
-                )
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-            OutlinedTextField(
-                value = age.value,
-                onValueChange = { age.value = it },
-                label = { Text(text = "Enter Age") },
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.Black,
-                    focusedBorderColor = Color.DarkGray,
-                    focusedLabelColor = Color.DarkGray,
-                    unfocusedTextColor = Color.Blue,
-                    unfocusedLabelColor = Color.Blue,
-                    unfocusedBorderColor = Color.Blue
-                ),
-                enabled = mode.value != "Delete"
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            FilledTonalButton(
-                onClick = {
-                    lifecycleScope.launch {
-                        message.value = when (mode.value) {
-                            "Create" -> addUserToFirebaseDB(name.value, age.value.toInt())
-                            "Update" -> updateFirebaseUser(name.value, age.value.toInt())
-                            "Delete" -> deleteFirebaseUser(name.value)
-                            else -> ""
-                        }
-                    }
-                }
-            ) {
-                Text(
-                    text = when (mode.value) {
-                        "Create" -> "Add User"
-                        "Update" -> "Update User"
-                        "Delete" -> "Delete User"
-                        else -> "404 Error"
-                    }
-                )
-            }
-        }
-    }
-
-    @Composable
-    fun DisplayUsersScreen(navController: NavController) {
-        val userList = remember { mutableStateOf<List<FirebaseUser>>(emptyList()) }
-        LaunchedEffect(Unit) {
-            userList.value = retrieveFirebaseUsers()
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(30.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            ElevatedButton(
-                onClick = { navController.popBackStack() },
-                colors = ButtonDefaults.elevatedButtonColors(
-                    containerColor = Color.Gray,
-                    contentColor = Color.DarkGray
-                )
-            ) {
-                Text(text = "Back")
-            }
-
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp)
-            ) {
-                items(userList.value) { user ->
-                    Text(text = "Name: ${user.name}, Age: ${user.age}")
-                    Divider()
+                Button(onClick = {
+                    uploadImage(it, context)
+                }) {
+                    Text(text = "Upload Image")
                 }
             }
         }
-    }
-
-    @Composable
-    fun AppNavigation() {
-        val navController = rememberNavController()
-        NavHost(navController = navController, startDestination = "FirebaseUserScreen") {
-            composable("FirebaseUserScreen") { FirebaseUserScreen(navController) }
-            composable("DisplayUsersScreen") { DisplayUsersScreen(navController) }
-        }
-    }
-
-    companion object {
-        const val TAG = "MainActivity"
     }
 }
-
-data class FirebaseUser(
-    val name: String = "",
-    val age: Int = 0,
-    var isAdult: Boolean = false
-)
