@@ -3,9 +3,13 @@ package com.example.firebasedemo
 import android.annotation.SuppressLint
 import android.content.ContentValues.TAG
 import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -75,11 +79,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.*
 import coil.compose.rememberAsyncImagePainter
@@ -96,66 +105,92 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             FirebaseDemoTheme {
-                ImageUploadScreen()
+//                Column (
+//                    modifier = Modifier
+//                        .fillMaxSize()
+//                        .padding(20.dp),
+//                    verticalArrangement = Arrangement.Center,
+//                    horizontalAlignment = Alignment.CenterHorizontally
+//                ) {
+//                    LinkText(text = "Click here to open website", url = "https://www.cricbuzz.com")
+//                }
+//                WebViewScreen(url = "https://www.cricbuzz.com")
+                SharedPreferenceExample(context = this)
             }
         }
-    }
-
-    val storage = Firebase.storage
-    val storageRef = storage.reference
-
-    fun uploadImage(uri: Uri, context: Context) {
-        val fileName = "images/${UUID.randomUUID()}.jpg"
-        val imageRef = storageRef.child(fileName)
-
-        imageRef.putFile(uri)
-            .addOnCompleteListener {takeSnapShot ->
-                imageRef.downloadUrl.addOnSuccessListener { uri -> 
-                    Toast.makeText(context, "Image URI: $uri", Toast.LENGTH_LONG).show()
-                }
-            }
-            .addOnFailureListener { exception ->
-                Toast.makeText(context,"Image upload failed: ${exception.message}", Toast.LENGTH_LONG).show()
-            }
     }
 
     @Composable
-    fun ImageUploadScreen() {
-        val context = LocalContext.current
-        val imageUri = remember{
-            mutableStateOf<Uri?>(null)
+    fun SharedPreferenceExample(context: Context) {
+        val sharedPreference = context.getSharedPreferences("my_prefs", Context.MODE_PRIVATE)
+        val editor = sharedPreference.edit()
+
+        var text by remember {
+            mutableStateOf(sharedPreference.getString("saved_text", "") ?: "")
         }
-        
-        val launcher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) {uri: Uri? -> 
-            imageUri.value = uri
-        }
-        
+
         Column (
-            modifier = Modifier.padding(20.dp)
-                .fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(20.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            TextField(value = text, onValueChange = { text = it}, label = { Text(text = "Enter Some Text")})
+
             Button(onClick = {
-                launcher.launch("image/*")
+                editor.putString("saved_text", text).apply()
             }) {
-                Text(text = "Select Image")
+                Text(text = "Save Text")
             }
-            Spacer(modifier = Modifier.height(20.dp))
-            imageUri.value?.let { 
-                Image(
-                    painter = rememberAsyncImagePainter(it),
-                    contentDescription = "Uploaded Image",
-                    modifier = Modifier.size(250.dp))
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Button(onClick = {
-                    uploadImage(it, context)
-                }) {
-                    Text(text = "Upload Image")
-                }
-            }
+            Text(text = "Saved text: ${sharedPreference.getString("saved_text", "")}")
         }
+    }
+
+    @Composable
+    fun LinkText(text: String, url: String) {
+        val context = LocalContext.current
+        val annotatedString = buildAnnotatedString {
+            append(text)
+            addStyle(
+                style = SpanStyle(
+                    color = Color.Blue,
+                    textDecoration = TextDecoration.Underline
+                ),
+                start = 0,
+                end = text.length
+            )
+            addStringAnnotation(
+                tag = "URL",
+                annotation = url,
+                start = 0,
+                end = url.length
+            )
+        }
+        ClickableText(text = annotatedString) { offset ->
+            annotatedString.getStringAnnotations("URL", offset, offset)
+                .firstOrNull()?.let { stringAnnotation ->
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(stringAnnotation.item))
+                    context.startActivity(intent)
+                }
+        }
+    }
+
+    @Composable
+    fun WebViewScreen(url: String) {
+        val context = LocalContext.current
+        
+        AndroidView(factory = {
+            WebView(context).apply { 
+                webViewClient = WebViewClient()
+                loadUrl(url)
+                settings.javaScriptEnabled = true
+            }
+        },
+            update = { webView ->
+                webView.loadUrl(url)
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
